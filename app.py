@@ -1,38 +1,64 @@
 import streamlit as st
 import pandas as pd
+from sklearn.preprocessing import OneHotEncoder
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.compose import ColumnTransformer
+from sklearn.pipeline import Pipeline
 
-# Load the CSV
+st.title("ACP Dynamic Pricing Calculator (ML Powered)")
+
+# Load CSV
 df = pd.read_csv("acp_pricing_table.csv")
 
-st.title("ACP Pricing Calculator")
+# Compute area in sqm
+df["Area_sqm"] = (df["Width_mm"] / 1000) * (df["Length_mm"] / 1000)
 
-# Step 1: Select Country
-country = st.selectbox("Select Country", sorted(df['Country'].unique()))
-filtered_df = df[df['Country'] == country]
+# Features and target
+X = df[["Country", "Product", "Alum_Thickness_mm", "Color", "Paint", "Area_sqm"]]
+y = df["Exw_Price_USD"]
 
-# Step 2: Select Alum Thickness
-thickness = st.selectbox("Select Alum Thickness", sorted(filtered_df['Alum_Thickness'].unique()))
-filtered_df = filtered_df[filtered_df['Alum_Thickness'] == thickness]
+# Preprocess categorical features
+categorical_features = ["Country", "Product", "Color", "Paint"]
 
-# Step 3: Select Width
-width = st.selectbox("Select Width (mm)", sorted(filtered_df['Width_mm'].unique()))
-filtered_df = filtered_df[filtered_df['Width_mm'] == width]
+preprocessor = ColumnTransformer(
+    transformers=[("cat", OneHotEncoder(handle_unknown="ignore"), categorical_features)],
+    remainder="passthrough"
+)
 
-# Step 4: Select Length
-length = st.selectbox("Select Length (mm)", sorted(filtered_df['Length_mm'].unique()))
-filtered_df = filtered_df[filtered_df['Length_mm'] == length]
+# ML Model Pipeline
+model = Pipeline(steps=[
+    ("preprocessor", preprocessor),
+    ("regressor", RandomForestRegressor(n_estimators=200, random_state=42))
+])
 
-# Step 5: Select Color
-color = st.selectbox("Select Color", sorted(filtered_df['Color'].unique()))
-filtered_df = filtered_df[filtered_df['Color'] == color]
+# Train the model
+model.fit(X, y)
 
-# Step 6: Select Paint
-paint = st.selectbox("Select Paint", sorted(filtered_df['Paint'].unique()))
-filtered_df = filtered_df[filtered_df['Paint'] == paint]
+# --- Streamlit Inputs ---
+country = st.text_input("Country", "UAE")
+product = st.text_input("Product", "3mm")
+thickness = st.number_input("Aluminum Thickness (mm)", min_value=0.05, max_value=10.0, step=0.01, value=3.0)
+width = st.number_input("Width (mm)", min_value=100, max_value=10000, step=1, value=1220)
+length = st.number_input("Length (mm)", min_value=100, max_value=10000, step=1, value=2440)
+color = st.text_input("Color", "Solid & Metallic")
+paint = st.text_input("Paint Type", "PE")
 
-# Display price
-if not filtered_df.empty:
-    price = filtered_df['Exw_Price_USD'].values[0]
-    st.success(f"Ex-Works Price per Sqm: ${price}")
-else:
-    st.warning("No matching configuration found.")
+# Compute area
+area_sqm = (width / 1000) * (length / 1000)
+
+# Prepare input for prediction
+input_df = pd.DataFrame([{
+    "Country": country,
+    "Product": product,
+    "Alum_Thickness_mm": thickness,
+    "Color": color,
+    "Paint": paint,
+    "Area_sqm": area_sqm
+}])
+
+# Predict price per sqm
+pred_price_per_sqm = model.predict(input_df)[0]
+total_price = pred_price_per_sqm * area_sqm
+
+st.success(f"Predicted Ex-Works Price per Sqm: ${pred_price_per_sqm:.2f}")
+st.success(f"Total Price for {area_sqm:.2f} sqm: ${total_price:.2f}")
